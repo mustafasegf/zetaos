@@ -1,0 +1,5 @@
+[toolchain]
+channel = "nightly"
+components = ["rustfmt", "rustc-dev", "llvm-tools-preview"]
+targets = ["x86_64-unknown-none"]
+profile = "complete"
