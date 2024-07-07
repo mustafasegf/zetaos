@@ -45,6 +45,8 @@ const FONT_WIDTH: i32 = 7;
 
 const BMP_DATA: &[u8; 24714] = include_bytes!("../resource/charmap-oldschool_white.bmp");
 
+const FONT_SIZE: usize = 4;
+
 lazy_static::lazy_static! {
     static ref FONT: Bmp<'static, Rgb888> = Bmp::<Rgb888>::from_slice(BMP_DATA).unwrap();
 }
@@ -76,11 +78,20 @@ fn draw_char(c: char, framebuffer: &mut Framebuffer) {
         for (idx_x, x) in ((FONT_WIDTH * font_x)..=(FONT_WIDTH * (font_x + 1))).enumerate() {
             let pixel = FONT.pixel(Point::new(x, y)).unwrap();
 
-            let pixel_offset = (idx_y * framebuffer.pitch() as usize) + (idx_x * 4);
-
             if pixel == Rgb888::WHITE {
-                unsafe {
-                    *(framebuffer.addr().add(pixel_offset as usize) as *mut u32) = 0xFFFFFFFF;
+                for off_x in 0..FONT_SIZE {
+                    for off_y in 0..FONT_SIZE {
+                        let idx_x = (idx_x * FONT_SIZE);
+                        let idx_y = (idx_y * FONT_SIZE);
+
+                        let pixel_offset = ((idx_y + off_y) * framebuffer.pitch() as usize)
+                            + ((idx_x + off_x) * 4);
+
+                        unsafe {
+                            *(framebuffer.addr().add(pixel_offset as usize) as *mut u32) =
+                                0xFFFFFFFF;
+                        }
+                    }
                 }
             }
         }
