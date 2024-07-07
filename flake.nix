@@ -16,6 +16,10 @@
         devShells.default = mkShell {
           buildInputs =
             [ (rust-bin.fromRustupToolchainFile ./rust-toolchain.toml) ];
+          shellHook = ''
+            export OVMF="${pkgs.OVMF.fd}/FV/OVMF.fd"
+          '';
         };
+
       });
 }

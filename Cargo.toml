@@ -4,7 +4,10 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-bootloader = "0.9.29"
+embedded-graphics-core = "0.4.0"
+lazy_static = { version = "1.5.0", features = ["spin_no_std"] }
+limine = "0.2.0"
+tinybmp = "0.6.0"
 
 [profile.dev]
 panic = "abort"
