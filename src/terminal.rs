@@ -3,81 +3,128 @@ use core::{
     sync::atomic::{AtomicU8, AtomicUsize, Ordering},
 };
 
-#[allow(dead_code)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[repr(u8)]
-pub enum Color {
-    Black = 0,
-    Blue = 1,
-    Green = 2,
-    Cyan = 3,
-    Red = 4,
-    Magenta = 5,
-    Brown = 6,
-    LightGrey = 7,
-    DarkGrey = 8,
-    LightBlue = 9,
-    LightGreen = 10,
-    LightCyan = 11,
-    LightRed = 12,
-    LightMagenta = 13,
-    LightBrown = 14,
-    White = 15,
+use embedded_graphics_core::{image::GetPixel, pixelcolor::Rgb888, prelude::*};
+use limine::{framebuffer::Framebuffer, request::FramebufferRequest};
+use tinybmp::Bmp;
+
+pub const FONT_HEIGHT: i32 = 9;
+pub const FONT_WIDTH: i32 = 7;
+
+pub const BMP_DATA: &[u8; 24714] = include_bytes!("../resource/charmap-oldschool_white.bmp");
+
+pub const FONT_SIZE: usize = 3;
+pub const TERMINAL_WIDTH: usize = 60;
+
+lazy_static::lazy_static! {
+    static ref FONT: Bmp<'static, Rgb888> = Bmp::<Rgb888>::from_slice(BMP_DATA).unwrap();
 }
 
-const fn vga_entry_color(fg: Color, bg: Color) -> u8 {
-    fg as u8 | (bg as u8) << 4
+pub static mut TERMINAL_WRITER: Option<TerminalWriter> = None;
+
+macro_rules! print {
+    ($($arg:tt)*) => {
+        unsafe {
+            let terminal_writer = core::ptr::addr_of_mut!(TERMINAL_WRITER);
+            let terminal_writer = (&mut *terminal_writer);
+            if let Some(terminal_writer) = terminal_writer {
+                write!(terminal_writer, $($arg)*).unwrap();
+            }
+
+        }
+    };
 }
 
-const fn vga_entry(uc: u8, color: u8) -> u16 {
-    uc as u16 | (color as u16) << 8
+macro_rules! println {
+    ($($arg:tt)*) => {
+        print!($($arg)*);
+        print!("\n");
+    };
 }
 
-const VGA_WIDTH: usize = 80;
-const VGA_HEIGHT: usize = 25;
+#[used]
+#[link_section = ".requests"]
+static FRAMEBUFFER_REQUEST: FramebufferRequest = FramebufferRequest::new();
 
 pub struct TerminalWriter {
-    pos: AtomicUsize,
-    color: AtomicU8,
-    buffer: *mut u16,
+    pub pos: AtomicUsize,
+    pub framebuffer: Framebuffer<'static>,
 }
 
 impl TerminalWriter {
-    pub const fn new() -> TerminalWriter {
+    pub fn new() -> Option<TerminalWriter> {
         let terminal_pos = AtomicUsize::new(0);
-        let terminal_color = vga_entry_color(Color::White, Color::Black);
-        let terminal_buffer = 0xb8000 as *mut u16;
 
-        TerminalWriter {
+        let framebuffer = FRAMEBUFFER_REQUEST.get_response()?.framebuffers().next()?;
+        return Some(TerminalWriter {
             pos: terminal_pos,
-            color: AtomicU8::new(terminal_color),
-            buffer: terminal_buffer,
+            framebuffer,
+        });
+
+        None
+    }
+
+    pub fn init() {
+        unsafe {
+            TERMINAL_WRITER = Some(TerminalWriter::new().unwrap());
         }
     }
 
-    #[allow(dead_code)]
-    pub fn set_color(&self, color: Color) {
-        self.color.store(color as u8, Ordering::Relaxed);
-    }
-
-    fn putchar(&self, c: u8) {
-        if c == b'\n' {
-            let mut pos = self.pos.load(Ordering::Relaxed);
-            pos += VGA_WIDTH - (pos % VGA_WIDTH);
-            self.pos.store(pos, Ordering::Relaxed);
+    pub fn put_char(&mut self, c: char) {
+        if c == '\n' {
+            let pos = self.pos.load(Ordering::Relaxed);
+            let new_pos = pos + TERMINAL_WIDTH - (pos % TERMINAL_WIDTH);
+            self.pos.store(new_pos, Ordering::Relaxed);
             return;
         }
 
-        let color = self.color.load(Ordering::Relaxed);
-        let pos = self.pos.fetch_add(1, Ordering::Relaxed);
-        unsafe {
-            *self.buffer.add(pos) = vga_entry(c, color);
+        if c < ' ' || c > '~' {
+            return;
         }
+
+        let index = c as i32 - 32;
+        let font_x = index % 18;
+        let font_y = index / 18;
+
+        for (idx_y, y) in ((FONT_HEIGHT * font_y)..=(FONT_HEIGHT * (font_y + 1))).enumerate() {
+            for (idx_x, x) in ((FONT_WIDTH * font_x)..=(FONT_WIDTH * (font_x + 1))).enumerate() {
+                let pixel = FONT.pixel(Point::new(x, y)).unwrap();
+
+                if pixel == Rgb888::WHITE {
+                    for off_x in 0..FONT_SIZE {
+                        for off_y in 0..FONT_SIZE {
+                            let idx_x = (idx_x * FONT_SIZE);
+                            let idx_y = (idx_y * FONT_SIZE);
+
+                            let terminal_offset = self.pos.load(Ordering::Relaxed);
+
+                            let terminal_x = (terminal_offset % TERMINAL_WIDTH)
+                                * FONT_SIZE
+                                * FONT_WIDTH as usize;
+
+                            let terminal_y = (terminal_offset / TERMINAL_WIDTH)
+                                * FONT_SIZE
+                                * FONT_HEIGHT as usize;
+
+                            let pixel_offset = ((idx_y + off_y + terminal_y)
+                                * self.framebuffer.pitch() as usize)
+                                + ((idx_x + off_x + terminal_x) * 4);
+
+                            unsafe {
+                                *(self.framebuffer.addr().add(pixel_offset as usize) as *mut u32) =
+                                    0xFFFFFFFF;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        self.pos.fetch_add(1, Ordering::Relaxed);
     }
 
-    pub fn write(&self, data: &[u8]) {
-        for c in data {
-            self.putchar(*c);
+    pub fn write(&mut self, buf: &[u8]) {
+        for c in buf.iter() {
+            self.put_char(*c as char);
         }
     }
 }

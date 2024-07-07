@@ -1,6 +1,9 @@
 #![no_std]
 #![no_main]
 #![allow(unused)]
+#![feature(const_refs_to_static)]
+#![feature(const_option)]
+#![feature(const_mut_refs)]
 
 #[macro_use]
 mod terminal;
@@ -8,11 +11,12 @@ mod terminal;
 use core::{cell::RefCell, fmt::Write, panic::PanicInfo};
 
 use limine::framebuffer::Framebuffer;
-use terminal::{Color, TerminalWriter};
+use terminal::TerminalWriter;
 
 use limine::request::FramebufferRequest;
 use limine::request::StackSizeRequest;
 use limine::BaseRevision;
+use terminal::TERMINAL_WRITER;
 
 /// Sets the base revision to the latest revision supported by the crate.
 /// See specification for further info.
@@ -26,10 +30,6 @@ pub const STACK_SIZE: u64 = 0x100000;
 
 #[used]
 #[link_section = ".requests"]
-static FRAMEBUFFER_REQUEST: FramebufferRequest = FramebufferRequest::new();
-
-#[used]
-#[link_section = ".requests"]
 pub static STACK_SIZE_REQUEST: StackSizeRequest = StackSizeRequest::new().with_size(STACK_SIZE);
 
 #[panic_handler]
@@ -37,63 +37,14 @@ fn panic(_info: &PanicInfo) -> ! {
     loop {}
 }
 
-use embedded_graphics_core::{image::GetPixel, pixelcolor::Rgb888, prelude::*};
-use tinybmp::Bmp;
-
-const FONT_HEIGHT: i32 = 9;
-const FONT_WIDTH: i32 = 7;
-
-const BMP_DATA: &[u8; 24714] = include_bytes!("../resource/charmap-oldschool_white.bmp");
-
-const FONT_SIZE: usize = 4;
-
-lazy_static::lazy_static! {
-    static ref FONT: Bmp<'static, Rgb888> = Bmp::<Rgb888>::from_slice(BMP_DATA).unwrap();
-}
-
 #[no_mangle]
 pub unsafe extern "C" fn _start() -> ! {
     assert!(BASE_REVISION.is_supported());
 
-    if let Some(framebuffer_response) = FRAMEBUFFER_REQUEST.get_response() {
-        let framebuffer = framebuffer_response.framebuffers();
-        if let Some(mut framebuffer) = framebuffer_response.framebuffers().next() {
-            draw_char('A', &mut framebuffer);
-        }
-    }
+    TerminalWriter::init();
+
+    println!("A A A, Mission Stato!");
+    println!("Welcome to Zeta OS");
 
     loop {}
-}
-
-fn draw_char(c: char, framebuffer: &mut Framebuffer) {
-    if c < ' ' || c > '~' {
-        return;
-    }
-
-    let index = c as i32 - 32;
-    let font_x = index % 18;
-    let font_y = index / 18;
-
-    for (idx_y, y) in ((FONT_HEIGHT * font_y)..=(FONT_HEIGHT * (font_y + 1))).enumerate() {
-        for (idx_x, x) in ((FONT_WIDTH * font_x)..=(FONT_WIDTH * (font_x + 1))).enumerate() {
-            let pixel = FONT.pixel(Point::new(x, y)).unwrap();
-
-            if pixel == Rgb888::WHITE {
-                for off_x in 0..FONT_SIZE {
-                    for off_y in 0..FONT_SIZE {
-                        let idx_x = (idx_x * FONT_SIZE);
-                        let idx_y = (idx_y * FONT_SIZE);
-
-                        let pixel_offset = ((idx_y + off_y) * framebuffer.pitch() as usize)
-                            + ((idx_x + off_x) * 4);
-
-                        unsafe {
-                            *(framebuffer.addr().add(pixel_offset as usize) as *mut u32) =
-                                0xFFFFFFFF;
-                        }
-                    }
-                }
-            }
-        }
-    }
 }
