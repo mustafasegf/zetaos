@@ -46,9 +46,13 @@ pub static STACK_SIZE_REQUEST: StackSizeRequest = StackSizeRequest::new().with_s
 
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
-    TerminalWriter::init();
     let msg = info.message();
     log!("Kernel panic: {}", msg);
+
+    unsafe {
+        io::exit(1);
+    }
+
     loop {}
 }
 

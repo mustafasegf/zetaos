@@ -19,3 +19,8 @@ pub unsafe fn outb(addr: u16, val: u8) {
         options(nomem, nostack, preserves_flags)
     );
 }
+
+pub unsafe fn exit(code: u8) {
+    // source: https://notes.burke.libbey.me/qemu-acpi/
+    outb(0x501, code); // ISA debug exit code in qemu
+}

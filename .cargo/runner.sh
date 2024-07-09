@@ -50,4 +50,5 @@ qemu-system-x86_64 \
   -serial stdio \
   -boot d \
   -bios "$OVMF" \
-  -drive file="$KERNEL".iso,format=raw
+  -drive file="$KERNEL".iso,format=raw \
+  -device isa-debug-exit
